@@ -1805,7 +1805,7 @@ CharDelete.MinLevel = 0
 #        Default:     30 - (Enabled)
 #                     0  - (Disabled, Don't delete any characters)
 
-CharDelete.KeepDays = 30
+CharDelete.KeepDays = 7
 
 #
 ###################################################################################################
@@ -2369,7 +2369,7 @@ MaxGroupXPDistance = 74
 #                     1 - (Rate.XP.Explore)
 #                     1 - (Rate.XP.Pet)
 
-Rate.XP.Kill      = 4
+Rate.XP.Kill      = 1
 Rate.XP.Quest     = 7
 Rate.XP.Quest.DF  = 4
 Rate.XP.Explore   = 4
