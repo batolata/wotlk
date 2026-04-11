@@ -125,6 +125,7 @@ enum Spells
     SPELL_IMPALING_SPEAR_KILL       = 70196,
     SPELL_REVIVE_CHAMPION           = 70053,
     SPELL_UNDEATH                   = 70089,
+    SPELL_IMPALING_SPEAR            = 71443,
     SPELL_AETHER_SHIELD             = 71463,
     SPELL_HURL_SPEAR                = 71466,
 
@@ -344,11 +345,17 @@ public:
                 return;
         }
 
+        uint32 corpseDelay = creature->GetCorpseDelay();
+        uint32 respawnDelay = creature->GetRespawnDelay();
+        creature->SetCorpseDelay(1);
+        creature->SetRespawnDelay(2);
+
         if (CreatureData const* data = creature->GetCreatureData())
             creature->SetPosition(data->posX, data->posY, data->posZ, data->orientation);
         creature->DespawnOrUnsummon();
 
-        creature->SetRespawnTime(5);
+        creature->SetCorpseDelay(corpseDelay);
+        creature->SetRespawnDelay(respawnDelay);
     }
 };
 
@@ -729,7 +736,7 @@ public:
         {
             me->SetReactState(REACT_DEFENSIVE);
             _didUnderTenPercentText = false;
-            _wipeCheckTimer = 3000;
+            _wipeCheckTimer = 1000;
             _handledWP4 = false;
 
             _events.Reset();
@@ -790,6 +797,7 @@ public:
             }
         }
 
+        using CreatureAI::WaypointReached;
         void WaypointReached(uint32 waypointId) override
         {
             switch (waypointId)
@@ -866,6 +874,27 @@ public:
 
         void DamageTaken(Unit*, uint32& damage, DamageEffectType, SpellSchoolMask) override
         {
+            if (!_wipeCheckTimer)
+            {
+                _wipeCheckTimer = 1000;
+                Player* player = nullptr;
+                Acore::AnyPlayerInObjectRangeCheck check(me, 60.0f);
+                Acore::PlayerSearcher<Acore::AnyPlayerInObjectRangeCheck> searcher(me, player, check);
+                Cell::VisitObjects(me, searcher, 60.0f);
+                // wipe
+                if (!player)
+                {
+                    damage *= 100;
+                    if (damage >= me->GetHealth())
+                    {
+                        FrostwingGauntletRespawner respawner;
+                        Acore::CreatureWorker<FrostwingGauntletRespawner> worker(me, respawner);
+                        Cell::VisitObjects(me, worker, 333.0f);
+                        return;
+                    }
+                }
+            }
+
             if (HealthBelowPct(10))
             {
                 if (!_didUnderTenPercentText)
@@ -883,36 +912,20 @@ public:
             }
         }
 
-        void UpdateEscortAI(uint32  /*diff*/) override {}
+        void UpdateEscortAI(uint32 diff) override
+        {
+            if (_wipeCheckTimer <= diff)
+                _wipeCheckTimer = 0;
+            else
+                _wipeCheckTimer -= diff;
+        }
 
         void UpdateAI(uint32 diff) override
         {
             npc_escortAI::UpdateAI(diff);
 
-            //Position pos = me->GetHomePosition();
-            if (!me->isActiveObject()/* && me->GetExactDist(&pos) < 5.0f*/) // during event
+            if (!me->isActiveObject())
                 return;
-
-            if (_wipeCheckTimer <= diff)
-            {
-                _wipeCheckTimer = 3000;
-
-                Player* player = nullptr;
-                Acore::AnyPlayerInObjectRangeCheck check(me, 140.0f);
-                Acore::PlayerSearcher<Acore::AnyPlayerInObjectRangeCheck> searcher(me, player, check);
-                Cell::VisitObjects(me, searcher, 140.0f);
-                // wipe
-                if (!player || me->GetExactDist(4357.0f, 2606.0f, 350.0f) > 125.0f)
-                {
-                    //Talk(SAY_CROK_DEATH);
-                    FrostwingGauntletRespawner respawner;
-                    Acore::CreatureWorker<FrostwingGauntletRespawner> worker(me, respawner);
-                    Cell::VisitObjects(me, worker, 333.0f);
-                    return;
-                }
-            }
-            else
-                _wipeCheckTimer -= diff;
 
             UpdateVictim();
 
@@ -966,7 +979,7 @@ public:
         bool CanAIAttack(Unit const* target) const override
         {
             // do not see targets inside Frostwing Halls when we are not there
-            return !target->IsPlayer() && (me->GetPositionY() > 2660.0f) == (target->GetPositionY() > 2660.0f) && target->GetEntry() != NPC_SINDRAGOSA;
+            return (me->GetPositionY() > 2660.0f) == (target->GetPositionY() > 2660.0f);
         }
 
     private:
@@ -993,18 +1006,30 @@ public:
 
     struct boss_sister_svalnaAI : public BossAI
     {
-        boss_sister_svalnaAI(Creature* creature) : BossAI(creature, DATA_SISTER_SVALNA)
+        boss_sister_svalnaAI(Creature* creature) : BossAI(creature, DATA_SISTER_SVALNA),
+            _isEventInProgress(false)
         {
+        }
+
+        void InitializeAI() override
+        {
+            if (!me->isDead())
+                Reset();
+            me->SetReactState(REACT_PASSIVE);
         }
 
         void Reset() override
         {
             _Reset();
-            me->SetImmuneToAll(true);
+            me->SetReactState(REACT_DEFENSIVE);
+            _isEventInProgress = false;
+        }
+
+        void JustReachedHome() override
+        {
+            _JustReachedHome();
             me->SetReactState(REACT_PASSIVE);
-            me->SetCanFly(true);
-            me->SetDisableGravity(true);
-            me->SendMovementFlagUpdate();
+            me->SetDisableGravity(false);
         }
 
         void JustDied(Unit* /*killer*/) override
@@ -1078,6 +1103,8 @@ public:
                     break;
                 case ACTION_START_GAUNTLET:
                     me->setActive(true);
+                    me->SetImmuneToAll(true);
+                    _isEventInProgress = true;
                     events.ScheduleEvent(EVENT_SVALNA_START, 25s);
                     break;
                 case ACTION_RESURRECT_CAPTAINS:
@@ -1104,16 +1131,21 @@ public:
             }
         }
 
+        void JustExitedCombat() override
+        {
+            if (_isEventInProgress)
+                return;
+            CreatureAI::JustExitedCombat();
+        }
+
         void MovementInform(uint32 type, uint32 id) override
         {
             if (type != EFFECT_MOTION_TYPE || id != POINT_LAND)
                 return;
-
+            _isEventInProgress = false;
+            me->setActive(false);
             me->SetImmuneToAll(false);
-            me->SetCanFly(false);
             me->SetDisableGravity(false);
-            me->SetReactState(REACT_AGGRESSIVE);
-            DoZoneInCombat(nullptr, 150.0f);
         }
 
         void SpellHitTarget(Unit* target, SpellInfo const* spell) override
@@ -1123,6 +1155,14 @@ public:
                 case SPELL_IMPALING_SPEAR_KILL:
                     Unit::Kill(me, target);
                     break;
+                case SPELL_IMPALING_SPEAR:
+                    if (TempSummon* summon = target->SummonCreature(NPC_IMPALING_SPEAR, *target))
+                    {
+                        Talk(EMOTE_SVALNA_IMPALE, target);
+                        summon->CastCustomSpell(VEHICLE_SPELL_RIDE_HARDCODED, SPELLVALUE_BASE_POINT0, 1, target, false);
+                        summon->SetUnitFlag2(UNIT_FLAG2_HIDE_BODY | UNIT_FLAG2_ALLOW_ENEMY_INTERACT);
+                    }
+                    break;
                 default:
                     break;
             }
@@ -1130,34 +1170,51 @@ public:
 
         void UpdateAI(uint32 diff) override
         {
-            if (!me->isActiveObject())
+            if (!UpdateVictim() && !_isEventInProgress)
                 return;
-
-            UpdateVictim();
 
             events.Update(diff);
 
             if (me->HasUnitState(UNIT_STATE_CASTING))
                 return;
 
-            switch (events.ExecuteEvent())
+            while (uint32 eventId = events.ExecuteEvent())
             {
-                case EVENT_SVALNA_START:
-                    Talk(SAY_SVALNA_EVENT_START);
-                    break;
-                case EVENT_SVALNA_RESURRECT:
-                    Talk(SAY_SVALNA_RESURRECT_CAPTAINS);
-                    me->CastSpell(me, SPELL_REVIVE_CHAMPION, false);
-                    break;
-                case EVENT_SVALNA_COMBAT:
-                    Talk(SAY_SVALNA_AGGRO);
-                    break;
-                default:
-                    break;
+                switch (eventId)
+                {
+                    case EVENT_SVALNA_START:
+                        Talk(SAY_SVALNA_EVENT_START);
+                        break;
+                    case EVENT_SVALNA_RESURRECT:
+                        Talk(SAY_SVALNA_RESURRECT_CAPTAINS);
+                        me->CastSpell(me, SPELL_REVIVE_CHAMPION, false);
+                        break;
+                    case EVENT_SVALNA_COMBAT:
+                        me->SetReactState(REACT_DEFENSIVE);
+                        Talk(SAY_SVALNA_AGGRO);
+                        break;
+                    case EVENT_IMPALING_SPEAR:
+                        if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 0.0f, true, false, -SPELL_IMPALING_SPEAR))
+                        {
+                            DoCast(me, SPELL_AETHER_SHIELD);
+                            me->AddAura(70203, me);
+                            DoCast(target, SPELL_IMPALING_SPEAR);
+                        }
+                        events.ScheduleEvent(EVENT_IMPALING_SPEAR, 20s, 25s);
+                        break;
+                    default:
+                        break;
+                }
+
+                if (me->HasUnitState(UNIT_STATE_CASTING))
+                    return;
             }
 
             DoMeleeAttackIfReady();
         }
+
+    private:
+        bool _isEventInProgress;
     };
 
     CreatureAI* GetAI(Creature* creature) const override
@@ -2125,6 +2182,32 @@ class spell_svalna_revive_champion : public SpellScript
     {
         OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_svalna_revive_champion::RemoveAliveTarget, EFFECT_0, TARGET_UNIT_DEST_AREA_ENTRY);
         OnEffectHit += SpellEffectFn(spell_svalna_revive_champion::Land, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
+class spell_svalna_remove_spear : public SpellScript
+{
+    PrepareSpellScript(spell_svalna_remove_spear);
+
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ SPELL_IMPALING_SPEAR });
+    }
+
+    void HandleScript(SpellEffIndex effIndex)
+    {
+        PreventHitDefaultEffect(effIndex);
+        if (Creature* target = GetHitCreature())
+        {
+            if (Unit* vehicle = target->GetVehicleBase())
+                vehicle->RemoveAurasDueToSpell(SPELL_IMPALING_SPEAR);
+            target->DespawnOrUnsummon(1ms);
+        }
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(spell_svalna_remove_spear::HandleScript, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
     }
 };
 
@@ -3548,7 +3631,7 @@ public:
     bool OnTrigger(Player* player, AreaTrigger const* /*areaTrigger*/) override
     {
         if (InstanceScript* instance = player->GetInstanceScript())
-            if (instance->GetBossState(DATA_SINDRAGOSA_GAUNTLET) == NOT_STARTED && !player->IsGameMaster())
+            if (instance->GetBossState(DATA_SINDRAGOSA_GAUNTLET) == NOT_STARTED)
                 if (Creature* gauntlet = ObjectAccessor::GetCreature(*player, instance->GetGuidData(NPC_SINDRAGOSA_GAUNTLET)))
                     gauntlet->AI()->DoAction(ACTION_START_GAUNTLET);
         return true;
@@ -3563,7 +3646,7 @@ public:
     bool OnTrigger(Player* player, AreaTrigger const* /*areaTrigger*/) override
     {
         if (InstanceScript* instance = player->GetInstanceScript())
-            if (instance->GetData(DATA_PUTRICIDE_TRAP_STATE) == NOT_STARTED && !player->IsGameMaster())
+            if (instance->GetData(DATA_PUTRICIDE_TRAP_STATE) == NOT_STARTED)
                 if (Creature* trap = ObjectAccessor::GetCreature(*player, instance->GetGuidData(NPC_PUTRICADES_TRAP)))
                     trap->AI()->DoAction(ACTION_START_GAUNTLET);
         return true;
@@ -3618,6 +3701,7 @@ void AddSC_icecrown_citadel()
     RegisterSpellScriptWithArgs(spell_trigger_spell_from_caster, "spell_svalna_caress_of_death", SPELL_IMPALING_SPEAR_KILL);
 
     RegisterSpellScript(spell_svalna_revive_champion);
+    RegisterSpellScript(spell_svalna_remove_spear);
     RegisterSpellScript(spell_icc_soul_missile);
     new at_icc_saurfang_portal();
     new at_icc_shutdown_traps();
