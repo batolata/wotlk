@@ -52,8 +52,8 @@ enum Spells
     SPELL_NIGHTMARE_PORTAL_VISUAL_PRE   = 71986,
     SPELL_NIGHTMARE_CLOUD               = 71970,
     SPELL_NIGHTMARE_CLOUD_VISUAL        = 71939,
-    SPELL_PRE_SUMMON_DREAM_PORTAL       = 72224, // normal
-    SPELL_PRE_SUMMON_NIGHTMARE_PORTAL   = 72480, // heroic
+    SPELL_PRE_SUMMON_DREAM_PORTAL       = 72224,
+    SPELL_PRE_SUMMON_NIGHTMARE_PORTAL   = 72480,
     SPELL_SUMMON_DREAM_PORTAL           = 71305,
     SPELL_SUMMON_NIGHTMARE_PORTAL       = 71987,
     SPELL_DREAMWALKERS_RAGE             = 71189,
@@ -94,10 +94,10 @@ enum Spells
     SPELL_GUT_SPRAY                     = 70633,
     SPELL_ROT_WORM_SPAWNER              = 70675,
 
-    // Dream Cloud (normal)
+    // Dream Cloud
     SPELL_EMERALD_VIGOR                 = 70873,
 
-    // Nightmare Cloud (heroic)
+    // Nightmare Cloud
     SPELL_TWISTED_NIGHTMARE             = 71941,
 };
 
@@ -177,14 +177,14 @@ private:
 class DelayedCastEvent : public BasicEvent
 {
 public:
-    DelayedCastEvent(Creature* trigger, uint32 spellId, ObjectGuid originalCaster, Milliseconds despawnTime) : _trigger(trigger), _originalCaster(originalCaster), _spellId(spellId), _despawnTime(despawnTime)
+    DelayedCastEvent(Creature* trigger, uint32 spellId, ObjectGuid originalCaster, uint32 despawnTime) : _trigger(trigger), _originalCaster(originalCaster), _spellId(spellId), _despawnTime(despawnTime)
     {
     }
 
     bool Execute(uint64 /*time*/, uint32 /*diff*/) override
     {
         _trigger->CastSpell(_trigger, _spellId, false, nullptr, nullptr, _originalCaster);
-        if (_despawnTime > 0ms)
+        if (_despawnTime);
             _trigger->DespawnOrUnsummon(Milliseconds(_despawnTime));
         return true;
     }
@@ -193,7 +193,7 @@ private:
     Creature* _trigger;
     ObjectGuid _originalCaster;
     uint32 _spellId;
-    Milliseconds _despawnTime;
+    uint32 _despawnTime;
 };
 
 class AuraRemoveEvent : public BasicEvent
@@ -417,8 +417,8 @@ public:
         {
             if (summon->GetEntry() == NPC_DREAM_PORTAL_PRE_EFFECT)
             {
-                summon->m_Events.AddEvent(new DelayedCastEvent(summon, SPELL_SUMMON_DREAM_PORTAL, me->GetGUID(), 6s), summon->m_Events.CalculateTime(15s));
-                summon->m_Events.AddEvent(new AuraRemoveEvent(summon, SPELL_DREAM_PORTAL_VISUAL_PRE), summon->m_Events.CalculateTime(15s));
+                summon->m_Events.AddEvent(new DelayedCastEvent(summon, SPELL_SUMMON_DREAM_PORTAL, me->GetGUID(), 6000), summon->m_Events.CalculateTime(15000));
+                summon->m_Events.AddEvent(new AuraRemoveEvent(summon, SPELL_DREAM_PORTAL_VISUAL_PRE), summon->m_Events.CalculateTime(15000));
             }
             else if (summon->GetEntry() == NPC_NIGHTMARE_PORTAL_PRE_EFFECT)
             {
@@ -744,7 +744,7 @@ public:
         void JustSummoned(Creature* summon) override
         {
             if (summon->GetEntry() == NPC_COLUMN_OF_FROST)
-                summon->m_Events.AddEvent(new DelayedCastEvent(summon, SPELL_COLUMN_OF_FROST_DAMAGE, ObjectGuid::Empty, 8s), summon->m_Events.CalculateTime(2s));
+                summon->m_Events.AddEvent(new DelayedCastEvent(summon, SPELL_COLUMN_OF_FROST_DAMAGE, ObjectGuid::Empty, 8000), summon->m_Events.CalculateTime(2000));
             else if (summon->GetEntry() == NPC_MANA_VOID)
                 summon->DespawnOrUnsummon(36s);
         }
@@ -1090,7 +1090,7 @@ public:
         void JustSummoned(Creature* summon) override
         {
             if (me->GetInstanceScript() && me->GetInstanceScript()->GetBossState(DATA_VALITHRIA_DREAMWALKER) == DONE)
-                summon->DespawnOrUnsummon(1ms);
+                summon->DespawnOrUnsummon(1s);
             else if (Unit* target = SelectTargetFromPlayerList(200.0f))
                 summon->AI()->AttackStart(target);
         }
