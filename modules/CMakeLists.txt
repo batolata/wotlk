@@ -353,7 +353,7 @@ foreach(ModuleName ${MODULE_LIST__})
 
   file(GLOB MODULE_CONFIG_LIST RELATIVE
     ${MODULE_CONFIG_PATH}
-    ${MODULE_CONFIG_PATH}/*.conf.dist)
+    ${MODULE_CONFIG_PATH}/*.conf)
 
   message(STATUS "  +- ${ModuleName}")
 
